@@ -259,7 +259,14 @@ if ($IndexFile) {
     Write-Step 'Reading the local vulnerability index...'
     try {
         $index = Get-Content -Path $IndexFile -Raw -Encoding UTF8 | ConvertFrom-Json
-        $prodCount = ($index.products.PSObject.Properties.Name).Count
+        $prodCount = 0
+        if ($index -and $index.products) { $prodCount = ($index.products.PSObject.Properties.Name).Count }
+        # Same rule as the network path: a file that parses but carries no products is not an index
+        # and reporting zero findings from it would be a false all-clear.
+        if ($prodCount -lt 1) {
+            Write-Host "  that file parsed but contains no products - it is not a usable index." -ForegroundColor Red
+            return
+        }
         Write-Host ("  index: {0} products, generated {1}" -f $prodCount, $index.generated)
     } catch {
         Write-Host "  that file is not a usable index ($($_.Exception.Message.Split([Environment]::NewLine)[0]))" -ForegroundColor Red
@@ -279,8 +286,22 @@ if (-not $index -and -not $Offline) {
         $body = $resp.Content
         if ($body -is [byte[]]) { $body = [Text.Encoding]::UTF8.GetString($body) }
         $index = $body | ConvertFrom-Json
-        $prodCount = ($index.products.PSObject.Properties.Name).Count
-        Write-Host ("  index: {0} products, generated {1}" -f $prodCount, $index.generated)
+
+        # A PARSE THAT SUCCEEDS IS NOT A VALID INDEX. A proxy, SSL-inspection appliance or captive
+        # portal can return something that parses to an object with no products - and accepting it
+        # reports ZERO CVEs, which reads as "your machine is clean" when the truth is "we never
+        # checked". That is the worst output a vulnerability scanner can produce. Seen on a corporate
+        # network 2026-08-31: 'index: 0 products' followed by '0 distinct CVEs'.
+        $prodCount = 0
+        if ($index -and $index.products) { $prodCount = ($index.products.PSObject.Properties.Name).Count }
+        if ($prodCount -lt 1) {
+            Write-Host "  the index came back empty or unreadable - NOT a clean result." -ForegroundColor Yellow
+            Write-Host "  Something between this machine and the index (a proxy or SSL inspection) likely"
+            Write-Host "  altered the response. Falling back to the offline snapshot."
+            $index = $null
+        } else {
+            Write-Host ("  index: {0} products, generated {1}" -f $prodCount, $index.generated)
+        }
     } catch {
         Write-Host "  could not reach the index ($($_.Exception.Message.Split([Environment]::NewLine)[0]))" -ForegroundColor Yellow
         Write-Host "  falling back to the offline snapshot path." -ForegroundColor Yellow
@@ -446,8 +467,8 @@ if (-not $NoReport -and $env:RFF_NO_OPEN -ne '1') { Start-Process $OutFile }
 # SIG # Begin signature block
 # MIIs4AYJKoZIhvcNAQcCoIIs0TCCLM0CAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBD3Ec5ClmK37FY
-# 04/kVrBNqmdFTVDON6/Tnj96ctum0aCCJfQwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAQowJow9V3v9oS
+# MSuOTwAjXYoyOTgZpGwFpKbj8lh7QKCCJfQwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -654,34 +675,34 @@ if (-not $NoReport -and $env:RFF_NO_OPEN -ne '1') { Start-Process $OutFile }
 # aXRlZDErMCkGA1UEAxMiU2VjdGlnbyBQdWJsaWMgQ29kZSBTaWduaW5nIENBIFIz
 # NgIRAOUh6XwCWyBKxteUB+wQfigwDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGC
 # NwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgor
-# BgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgCkiRgYTA
-# NVHprzb13KtaxqiH0E0mvY31Yv+27NvC3lgwDQYJKoZIhvcNAQEBBQAEggIAkXm4
-# 6HRpqWdOYs9DsbysOI9RizWpUJ4J6KLQxxqsOKleCS8XpxJVyJZrgEdUH+9o5Ah+
-# 9Los8o2e3ZCBIRb2nukrfkIFV/xjqx/WW+swqsB01Rgzy5KTrpms9l6LaGJUZ42Q
-# x6MqKAh2EnQR9QxZRuEUTzQ87QhBOVAcXJU0xpz+E6ZAgdkng1znt7oA75VWN/Rs
-# cXTvkox201WvpqybAociaaqe4IzJ3LR/Y85nxjEwZQGf7lTqqrU9wWM5fFa2CsLi
-# k59iY03uwzYzXXBY3P0c1Yp+q3Kj7spnoslP7gqUx8fXe4PGoPZgUQHg8yy9jbOs
-# Mue7ys3cZ6V1USIZhtyQ16DBdATPh6cjtodsB4UyOoIZLRjFJH6tcKFwn0g/4CCG
-# LO5MngPmICEKXaq70qnhaY570jw+flHEaXNY3n/vKQ6OcDSiVrg+Y+Q8ym4Zl3Zw
-# 9LdvbbLv0vZnqaeM2UetmsZV0LLT7/qZqgL+DfstSELybLoV4Y+7AodZjPwp/JpW
-# lbrOu+yd1tA7YIhe6hABYYTJlPJi6INqeaSM1VCqUbJ3SOOagxi2s5qGeTd94899
-# NWnA0/kWe7Eztv1y8eXAIwjTkbqwVXg16WmMShvmwuDyhBLdvUv31SkH2n1VdZ7p
-# edHzLXr01FK6RnANJPvwXGxba9LxbHi14r4IA1KhggMjMIIDHwYJKoZIhvcNAQkG
+# BgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgG1PKRpwS
+# 9vpWXMe7FBbEaL/rtuz3dZP5MbzW4fW/f4owDQYJKoZIhvcNAQEBBQAEggIALsUz
+# AOEzJesLmGpo/oKrYXmxtaeJfJIobhmenoNcDlfNIxnxkSj47c3sdhNLzSfGZChc
+# 1jfyXeOjSlDFsrmLq6Duh2bAsD34MVSeDua7IDya1tGigWeYghY8SuWe7Gx5XQA4
+# 1Xxi4K/Gi3DFoq1fyEHOaeDHgxnIGAoVr99B/TdG5Hc1TtWUH4X3nSghitPq9ZeX
+# v90VYSGboOFi3ripJ2csTqVNa6bFXAXz1+ExJCcMubvKAcQ+xeOdSfiy5jHPxXFt
+# LwXe2h1r8SqyiGU7eWkKenRXoJLwpmWD9ERUD5hal/MuwE+nqg9xhlNBH3KmTnnV
+# KLi24NBUBdMrqMYRZQWnuwRbaNKb9VSEYM8SSEvG1gLJ5SGQL1GDlZcaGXtebRf9
+# hEyjnjyrrTW9RvTHdT4PVXIWKpOpCyV3twEUU+91nffqPMmAqB9C2U74JCAzYqyR
+# ov4q7bQKGjiO792GtnmCmymxVAxeEuatrO6KuU7CjTFC+tTWVbOC8m9NmfrGiSx9
+# 0P5thK2dB1JqMF6SVg9P3hCT8yHQsTT80Dj3rcTkjrVnGa2Cju8H1mzNfg3hTsfF
+# 0EmpuObU/HSXnQ2H5xRKvafkL393j/vaSHlqYGIQ91mFZ4hN1AfxjbEpFX53ICGn
+# +Q0Kq0NRpuZiJiNAluMYVCzXu6++1iLsb/cFV2ChggMjMIIDHwYJKoZIhvcNAQkG
 # MYIDEDCCAwwCAQEwajBVMQswCQYDVQQGEwJHQjEYMBYGA1UEChMPU2VjdGlnbyBM
 # aW1pdGVkMSwwKgYDVQQDEyNTZWN0aWdvIFB1YmxpYyBUaW1lIFN0YW1waW5nIENB
 # IFI0MQIRAOdO8lWwUE/626bf9/yLoxUwDQYJYIZIAWUDBAICBQCgeTAYBgkqhkiG
-# 9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA4MzExNjM0NTZa
-# MD8GCSqGSIb3DQEJBDEyBDCnWwk9xMj7tF3Lv+djdtlyHp4tsTue53mbvDd81VJ3
-# n244t2cdBSg1xkDxcSCwGP0wDQYJKoZIhvcNAQEBBQAEggIAAa/4EJ6BQrr1ZYuJ
-# sfFZrD6wpap0/G7L3WhCGgsRQ2C2birBlw6BcHvJq78ryOVGNNm6y7QFkg41YlHv
-# WlDlcPlVgIzXvpuvIac7/F6qUSUwDKp491k7Xgs3x4Vcz89DEPMu25/kVmfcCMea
-# 3H9AmcEL0kvcC2EYZfSXx6bQvjs9naETTCGkG3YR8DJ2Ap6MPnLrDfpehPQhGfnD
-# 9be4m1+TUnOwNB5sM4ZLBPEN3tYBUObFTuMItFnlffiZybkMRwlGTN9fKQQ1SUJC
-# yopQRHQ1f0PIk4e2vkyPSC83DbQm1Uw+Zq2C4On0ru18jFTE5Pn650j7oSbOdSvx
-# 4VoYmnnPWsQFdzaq5SdjURYGbVVyk6RcdcJ78NyvERcyhX40gwVOWXYTBpjeMo5X
-# pHAiS51QAchzBseS6QX/EJrWzJ92YcEwtmW7sv/Cwcbfyf2K4dGSB1LVv5MsoT/h
-# 9xeojDtXPzpNGynq5ZP4RhVYvcwCix+930576CvcQKsXAnlGbCdgjy8KCaI1wzU2
-# PBzA35IalW9OX2osH1VdximHU1feIVsbDHmm2N198TKSj49aJ+OmkddQcvZK9tML
-# IzcbhHTyS6H/ox6eOHko/A/BGL8vJoSTqyuEo4sdGHMjHPJfRs/YyHmWKFjHMDh4
-# B0lmMGy7EtlDJfND7nDx4ZlYynA=
+# 9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA4MzExNjQzNTha
+# MD8GCSqGSIb3DQEJBDEyBDCpljGOAYqgXxTNtzBlNfTjMU/wBZGuYKpvmXaaP4gf
+# KL7uXatnVJ+dxwUsHVoOwkgwDQYJKoZIhvcNAQEBBQAEggIALRAEqM76sjWVlNGM
+# Wt7wxDoMm9Vcr1if0MI3D6H+LAHBRp8aumQQKvXOb1FY+nbiPnT4kDX1Z0cQ3rd7
+# VjyXbkqMTVF/il3Jx2fUF0kT4MgxIUdN/MdrYznUjxouEuYnILpp4r4yQ98GNXV6
+# 1yQS/AgvNHMB4ryu4n5ik1SFE0N2A5eH+dl89Db3xR9FguFxvcWbCavULRwa9yMc
+# LbCckYDtJtiRbNnkFF0TFWuL+2hl9L9NyIpOsmpO46NZl9AAmuzmFb88loF8eiDY
+# OHo3iZr8SiF4kv3J/sLbx8jo0aZ/St+ehecvNdNpo1psHv/q06f4DOzJRmHEdigc
+# Gl2XAMFQ0dbG0+JLZB/Mc9ZBGypb9t5wJ3i0SzBQ9sv+HyRdrr+Wv7ZaY4R+TViG
+# ngQJtKl9GJk2oEofpiKuz1mWBDw1tMfGmnCKqYmlWRgjvQThs76vW1wIOG6uioy4
+# DNOl2dMx6Rko/BXnOxQX+Kx20xsWB/cDm1zEguNc4QtcMxX/qja464oXU3XuNR5b
+# xnC/3GpupWfYoFOj7Ws7dlbqQ/l/Vmtkwv4dcbf2hcVh+9A/oEVEa4xJLpQx6Z/m
+# zLQyBnAgbhghCbsO0ndmvNe8A6yKgq15wm7Nk9iMK8l6WrJBUYJ2lz2nLJYbKYK5
+# f3shVnJdvh+sj+jTHNEHwtam54Q=
 # SIG # End signature block
