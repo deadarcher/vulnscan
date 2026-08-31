@@ -70,7 +70,11 @@ says how many profiles it could not read rather than quietly reporting only your
 
 Two public sources, no API keys:
 
-- **Applications** come from NVD's CVE feed, pruned to the products a real fleet actually runs.
+- **Applications** come from NVD's CVE feed, pruned to roughly the top 500 Windows applications by
+  published CVE count. The product list is committed at `data/fleet-cpes.json`, so you can see
+  exactly what is covered, and open a PR to add something. The pruning is a size decision: the
+  full catalogue is far too large to hand a browser, and most of it is server, web and appliance
+  software that never appears on a Windows endpoint.
 - **Windows** comes from Microsoft's MSRC CVRF feed, keyed by build number. Microsoft publishes no
   first-party Windows OVAL, and OS advisories carry MSRC product ids rather than CPEs, so NVD's
   ranges cannot describe "Windows 11 24H2 x64" in a form you can match a build against.
@@ -91,9 +95,10 @@ Windows fix revisions are only available from around 2021, because Microsoft did
 before then. A machine further behind than that gets a floor rather than a complete answer, and the
 report says so on the machine it affects rather than in a footnote.
 
-Application coverage is bounded by the index. An application that is not in it is reported as
-collected-but-unchecked, never as clean. If a product you care about is missing, or a match looks
-wrong, [open an issue](https://github.com/deadarcher/vulnscan/issues).
+Application coverage is bounded by the index: roughly the top 500 Windows applications by published
+CVE count. An application that is not in it is reported as collected-but-unchecked, never as clean.
+If a product you care about is missing, or a match looks wrong,
+[open an issue](https://github.com/deadarcher/vulnscan/issues) or add it to `data/fleet-cpes.json`.
 
 ## Why it exists
 
