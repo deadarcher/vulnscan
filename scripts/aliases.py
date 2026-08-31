@@ -131,3 +131,15 @@ def exclude_list():
             return json.load(fh).get("exclude", [])
     except FileNotFoundError:
         return []
+
+
+def incomparable_map():
+    """Products whose installed-version scheme does not line up with the index's. Apps binding to
+    these must be reported as "could not compare", never as clean: the comparison silently succeeds
+    and returns the wrong answer, which is the one outcome a vulnerability scanner must not produce.
+    Shipped in the index so both consumers apply the same list."""
+    try:
+        with open(_OVERRIDES, encoding="utf-8") as fh:
+            return json.load(fh).get("incomparable", {})
+    except FileNotFoundError:
+        return {}

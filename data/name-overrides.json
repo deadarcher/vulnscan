@@ -17,7 +17,14 @@
     "         product rather than the product: an add-in or a virtual printer carries its OWN version,",
     "         so comparing it against the parent product's CVE ranges is meaningless in both",
     "         directions. This cannot be expressed as an alias, because word-subset matching has no",
-    "         way to say 'not this', so the consumers check it separately."
+    "         way to say 'not this', so the consumers check it separately.",
+    "",
+    "incomparable: products whose installed version and index versions are in DIFFERENT SCHEMES, so",
+    "              no comparison between them means anything. Apps binding to these are reported as",
+    "              'could not compare' and are never counted as clean. This is the honest option: the",
+    "              alternative is a silent false negative, and 'we could not check' must never render",
+    "              as 'you are fine'. Do not add entries here to silence noise - only where the",
+    "              mismatch is verified and the reason is stated."
   ],
   "add": {
     "oracle:jre": [
@@ -40,13 +47,22 @@
     "oracle:jre": "Oracle ships as 'Java 8 Update NNN'; no Oracle CPE product contains the word java.",
     "ibm:java": "The bare needle 'java' captured Oracle's Java on a real machine. IBM's JDK identifies itself as 'IBM SDK' or 'Semeru', so it loses nothing.",
     "chaos_tool_suite_project:ctools": "A Drupal module. 'CTools' on Windows is something else entirely; the bare needle only ever produces a wrong match.",
-    "exclude": "Components, not products. Their version is the component's, not the parent's, so any comparison against the parent's CVE ranges is meaningless. Measured on a real machine: the Teams Meeting Add-in at 1.26.20101 collected 10 Teams CVEs, and the OneNote virtual printer at 1.0.0.0 collected 6."
+    "exclude": "Components, not products. Their version is the component's, not the parent's, so any comparison against the parent's CVE ranges is meaningless. Measured on a real machine: the Teams Meeting Add-in at 1.26.20101 collected 10 Teams CVEs, and the OneNote virtual printer at 1.0.0.0 collected 6.",
+    "microsoft:.net_framework": "ASP.NET Core is not the .NET Framework. 'Microsoft ASP.NET Core 8.0.30 - Shared Framework' bound to microsoft:.net_framework purely on the shared words, which is a different product line entirely."
   },
   "exclude": [
     "teams meeting add-in",
     "teams vdi",
     "onenotevirtualprinter",
     "python launcher",
-    "mozilla maintenance service"
-  ]
+    "mozilla maintenance service",
+    "asp.net core"
+  ],
+  "incomparable": {
+    "oracle:jre": "NVD carries Java's update level in the CPE update field, not the version, so the index holds only 1.8, 1.8.0 and 8.0 for all of Java 8. It cannot tell 8u481 from 8u451. The installed registry version (8.0.4810.10) is Oracle's installer version and compares above every bound, so the app silently reported clean.",
+    "oracle:jdk": "Same as oracle:jre - the update level is not in the version.",
+    "oracle:java_se": "Same as oracle:jre.",
+    "ibm:java": "Same scheme problem as the Oracle Java entries.",
+    "microsoft:.net": "The .NET SDK's registry version is its installer version (8.1.3026.37309 for SDK 8.0.130), which shares no scheme with the index's product versions (5.0 to 10)."
+  }
 }

@@ -102,9 +102,10 @@ def main():
         print(f"  deduped {before - after} identical rows ({100 * (before - after) // before}%)")
 
     sys.path.insert(0, HERE)
-    from aliases import build_table, exclude_list
+    from aliases import build_table, exclude_list, incomparable_map
     merged_aliases = build_table(app_products)
     merged_exclude = exclude_list()
+    merged_incomparable = incomparable_map()
 
     merged = {
         "v": 1,
@@ -112,6 +113,7 @@ def main():
         "products": app_products,
         "aliases": merged_aliases,
         "excludeNames": merged_exclude,
+        "incomparable": merged_incomparable,
         "builds": os_index["builds"],
         "os": os_index["os"],
         "osGenerated": os_index["generated"],
