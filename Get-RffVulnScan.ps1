@@ -273,7 +273,12 @@ if (-not $index -and -not $Offline) {
         $prev = $ProgressPreference; $ProgressPreference = 'SilentlyContinue'   # 5.1 is very slow with the bar
         $resp = Invoke-WebRequest -Uri $IndexUrl -UseBasicParsing -TimeoutSec 60
         $ProgressPreference = $prev
-        $index = $resp.Content | ConvertFrom-Json
+        # $resp.Content is a STRING when the server sends a text content-type, but a byte[] when it
+        # does not - which is what a GitHub Release asset (the redirect target) returns. Decode the
+        # bytes ourselves so the parse never depends on the server guessing right.
+        $body = $resp.Content
+        if ($body -is [byte[]]) { $body = [Text.Encoding]::UTF8.GetString($body) }
+        $index = $body | ConvertFrom-Json
         $prodCount = ($index.products.PSObject.Properties.Name).Count
         Write-Host ("  index: {0} products, generated {1}" -f $prodCount, $index.generated)
     } catch {
@@ -441,8 +446,8 @@ if (-not $NoReport -and $env:RFF_NO_OPEN -ne '1') { Start-Process $OutFile }
 # SIG # Begin signature block
 # MIIs4AYJKoZIhvcNAQcCoIIs0TCCLM0CAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBz7iN5h3au6ZA0
-# hhgjmer0JGpEo3it6aXX4LIUs25E9aCCJfQwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBD3Ec5ClmK37FY
+# 04/kVrBNqmdFTVDON6/Tnj96ctum0aCCJfQwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -649,34 +654,34 @@ if (-not $NoReport -and $env:RFF_NO_OPEN -ne '1') { Start-Process $OutFile }
 # aXRlZDErMCkGA1UEAxMiU2VjdGlnbyBQdWJsaWMgQ29kZSBTaWduaW5nIENBIFIz
 # NgIRAOUh6XwCWyBKxteUB+wQfigwDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGC
 # NwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgor
-# BgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgpJOQX2v+
-# Ep+/XFftfqrlkLBsrSnftrnPXealEwr8lQ0wDQYJKoZIhvcNAQEBBQAEggIAoFWh
-# f97kZu9qc39WCj/KsUKtQLxFggu7Ugmfi+jNuWI3wDwLBPqTP7thWH0edQ08YOpQ
-# oxhJfnG2F8qlSNFaBXZocGz+SNIhO5v6czkG43ry7pdreQlqqJaNyBBoOYFXA/J3
-# 8koZLGaOOxkzmIpcq9nwCXSxC2bw6wBFzJ6ifPFxU0qQuWC5oljA9CeXDdTmptKc
-# yi/n19EpqQaKADDYoJIeCg6mfend/JErS3/KDEUQeuUEttloWG7JwAcn5QNFfvCe
-# 8HcsxzTw6Vw/L1Co7C6wFYrk7PmC3AVV3tbwi0yhOUdve9loV6uUJLic57V2HpJa
-# JZkUST0sPpXj8bpBW8OgRrENP8qgV9e2hsX1k3eXMNx34XzIDr4Q16EHbZC/cVB8
-# nWOq31uADJNYKYZPIbOZ7MIIncbmKhXL1aoGHCyGJArwrQ9spwVf+BnzBehgptQT
-# 6Dq8OVa2d2+pdpteHABCV7A4Hj5lkapRgIJfzOIA5VXjdewbce/Xa74pbCQ9FpBn
-# dvI9asbteism+0DjKdtn1IhVnmMb5HkBjLHIV6ESiSJUHFetEGlJKqs1AeSHyvaY
-# kckN2UPIwdYc0ozOL/dfpnE75rD32N2V14noVGikF758tavwx3UF4e/aHegUxB0S
-# S+7OVJTCJ6BwuPQQ77xQDhfxUG8eza5V6smBoyGhggMjMIIDHwYJKoZIhvcNAQkG
+# BgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgCkiRgYTA
+# NVHprzb13KtaxqiH0E0mvY31Yv+27NvC3lgwDQYJKoZIhvcNAQEBBQAEggIAkXm4
+# 6HRpqWdOYs9DsbysOI9RizWpUJ4J6KLQxxqsOKleCS8XpxJVyJZrgEdUH+9o5Ah+
+# 9Los8o2e3ZCBIRb2nukrfkIFV/xjqx/WW+swqsB01Rgzy5KTrpms9l6LaGJUZ42Q
+# x6MqKAh2EnQR9QxZRuEUTzQ87QhBOVAcXJU0xpz+E6ZAgdkng1znt7oA75VWN/Rs
+# cXTvkox201WvpqybAociaaqe4IzJ3LR/Y85nxjEwZQGf7lTqqrU9wWM5fFa2CsLi
+# k59iY03uwzYzXXBY3P0c1Yp+q3Kj7spnoslP7gqUx8fXe4PGoPZgUQHg8yy9jbOs
+# Mue7ys3cZ6V1USIZhtyQ16DBdATPh6cjtodsB4UyOoIZLRjFJH6tcKFwn0g/4CCG
+# LO5MngPmICEKXaq70qnhaY570jw+flHEaXNY3n/vKQ6OcDSiVrg+Y+Q8ym4Zl3Zw
+# 9LdvbbLv0vZnqaeM2UetmsZV0LLT7/qZqgL+DfstSELybLoV4Y+7AodZjPwp/JpW
+# lbrOu+yd1tA7YIhe6hABYYTJlPJi6INqeaSM1VCqUbJ3SOOagxi2s5qGeTd94899
+# NWnA0/kWe7Eztv1y8eXAIwjTkbqwVXg16WmMShvmwuDyhBLdvUv31SkH2n1VdZ7p
+# edHzLXr01FK6RnANJPvwXGxba9LxbHi14r4IA1KhggMjMIIDHwYJKoZIhvcNAQkG
 # MYIDEDCCAwwCAQEwajBVMQswCQYDVQQGEwJHQjEYMBYGA1UEChMPU2VjdGlnbyBM
 # aW1pdGVkMSwwKgYDVQQDEyNTZWN0aWdvIFB1YmxpYyBUaW1lIFN0YW1waW5nIENB
 # IFI0MQIRAOdO8lWwUE/626bf9/yLoxUwDQYJYIZIAWUDBAICBQCgeTAYBgkqhkiG
-# 9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA4MzEwNTQ0NTJa
-# MD8GCSqGSIb3DQEJBDEyBDAwUsliYZI8njsHHfDfvoW3B6+IpjjWprEjVilYGri0
-# Bp0NTH8t0FCWayuJND39qBEwDQYJKoZIhvcNAQEBBQAEggIAAzX0T5jXlbOEP26O
-# 3pgds9nSN488xECRQp5sfywrrXNZIpPjZ0yovYmMzle10uKmGTaewlSV/zPhq71J
-# 7lvmavpzsq5K9+o7ruOWZi0eAbY9CUUQAc6QcmbJY+8B9JcQviwWUAc1Q7OWSiGL
-# vlLiBrfq7yQDmDfKl5eyHxQOaPdkmAhzCQLtVvpYUDNlwsNN6HrvSoQFRECFp0Mi
-# OPHJ3HwhPXqNmIBqmqkVVAZuTqAndqI6zTyJIBLxrwwZuIqQo1pkSRge1+pe8iUp
-# Y9B4T9iNwIdv5iRTkeZ7Ev29jY2E8cP1IPhbexTfWUn2W2PKyW0tQlyktAf1a2eO
-# +p8qNVnMzekOOph0FxL5JG6T2lwtqQbcGU1IJV6TlvatDw3+3BcHY8LBqyrl0qp6
-# kSHhLRYj3e7javwmJOi/vslbiyucXwbs/f3X8zGIgoI3Y0HR7hllRyWRMFD3ZmK5
-# 313LDvTRV0pf5upx9KyvfdnHtaAr+HvmLQpzl2OnhX+SZ1nJhg0pGJdDMUhli867
-# jiqCGOcYmqGaTvdAqtHFKUaMkLu1gleCkFf+J5j0zlz2fmlSpNKB+wAZppYvkBFA
-# GRgqUwibEACPT54FA3SUZh7LoNc/HHXFF0BDkI7dR8VIkZUQVLrisduhVJFks7js
-# SJUj+BouIhKi98t2l/rY+JrbbTM=
+# 9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA4MzExNjM0NTZa
+# MD8GCSqGSIb3DQEJBDEyBDCnWwk9xMj7tF3Lv+djdtlyHp4tsTue53mbvDd81VJ3
+# n244t2cdBSg1xkDxcSCwGP0wDQYJKoZIhvcNAQEBBQAEggIAAa/4EJ6BQrr1ZYuJ
+# sfFZrD6wpap0/G7L3WhCGgsRQ2C2birBlw6BcHvJq78ryOVGNNm6y7QFkg41YlHv
+# WlDlcPlVgIzXvpuvIac7/F6qUSUwDKp491k7Xgs3x4Vcz89DEPMu25/kVmfcCMea
+# 3H9AmcEL0kvcC2EYZfSXx6bQvjs9naETTCGkG3YR8DJ2Ap6MPnLrDfpehPQhGfnD
+# 9be4m1+TUnOwNB5sM4ZLBPEN3tYBUObFTuMItFnlffiZybkMRwlGTN9fKQQ1SUJC
+# yopQRHQ1f0PIk4e2vkyPSC83DbQm1Uw+Zq2C4On0ru18jFTE5Pn650j7oSbOdSvx
+# 4VoYmnnPWsQFdzaq5SdjURYGbVVyk6RcdcJ78NyvERcyhX40gwVOWXYTBpjeMo5X
+# pHAiS51QAchzBseS6QX/EJrWzJ92YcEwtmW7sv/Cwcbfyf2K4dGSB1LVv5MsoT/h
+# 9xeojDtXPzpNGynq5ZP4RhVYvcwCix+930576CvcQKsXAnlGbCdgjy8KCaI1wzU2
+# PBzA35IalW9OX2osH1VdximHU1feIVsbDHmm2N198TKSj49aJ+OmkddQcvZK9tML
+# IzcbhHTyS6H/ox6eOHko/A/BGL8vJoSTqyuEo4sdGHMjHPJfRs/YyHmWKFjHMDh4
+# B0lmMGy7EtlDJfND7nDx4ZlYynA=
 # SIG # End signature block
