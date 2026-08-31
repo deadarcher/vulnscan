@@ -1,0 +1,4 @@
+# The collector is Authenticode-signed. Its signature is over the exact bytes, so git must never
+# normalize its line endings - -text disables all EOL conversion for it.
+Get-RffVulnScan.ps1 -text
+*.ps1 -text
