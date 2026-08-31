@@ -143,3 +143,14 @@ def incomparable_map():
             return json.load(fh).get("incomparable", {})
     except FileNotFoundError:
         return {}
+
+
+def version_from_name_map():
+    """Per-product rules that derive a comparable version from the display name. Shipped in the
+    index so both consumers apply the same rewrite; if none matches, the incomparable entry still
+    applies and the app is reported as unchecked rather than silently clean."""
+    try:
+        with open(_OVERRIDES, encoding="utf-8") as fh:
+            return json.load(fh).get("versionFromName", {})
+    except FileNotFoundError:
+        return {}

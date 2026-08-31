@@ -65,7 +65,7 @@ jobs:
           import json, sys
           d = json.load(open("cve-index.json"))
           os_rows = sum(len(v) for v in d.get("os", {}).values())
-          app = len(d.get("products", {}))
+          app = len(d.get("productsV2") or d.get("products", {}))
           aliases = len(d.get("aliases", {}))
           print(f"app products={app}  aliases={aliases}  os builds={len(d.get('os',{}))}  os rows={os_rows}")
           # Refuse to publish a broken index over a working one.

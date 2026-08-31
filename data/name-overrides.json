@@ -24,7 +24,15 @@
     "              'could not compare' and are never counted as clean. This is the honest option: the",
     "              alternative is a silent false negative, and 'we could not check' must never render",
     "              as 'you are fine'. Do not add entries here to silence noise - only where the",
-    "              mismatch is verified and the reason is stated."
+    "              mismatch is verified and the reason is stated.",
+    "",
+    "versionFromName: derive a comparable version from the DISPLAY NAME when the registry version is",
+    "                 in a different scheme from the index. Oracle ships Java 8 as 'Java 8 Update 481'",
+    "                 with registry version 8.0.4810.10, while NVD states it as 1.8.0 + update481.",
+    "                 The name carries the update number plainly, so it is read from there rather than",
+    "                 by decoding 4810, which would be arithmetic guesswork.",
+    "                 If no rule matches, the product's incomparable entry still applies, so an",
+    "                 unrecognised Java build is reported as unchecked rather than silently clean."
   ],
   "add": {
     "oracle:jre": [
@@ -48,7 +56,8 @@
     "ibm:java": "The bare needle 'java' captured Oracle's Java on a real machine. IBM's JDK identifies itself as 'IBM SDK' or 'Semeru', so it loses nothing.",
     "chaos_tool_suite_project:ctools": "A Drupal module. 'CTools' on Windows is something else entirely; the bare needle only ever produces a wrong match.",
     "exclude": "Components, not products. Their version is the component's, not the parent's, so any comparison against the parent's CVE ranges is meaningless. Measured on a real machine: the Teams Meeting Add-in at 1.26.20101 collected 10 Teams CVEs, and the OneNote virtual printer at 1.0.0.0 collected 6.",
-    "microsoft:.net_framework": "ASP.NET Core is not the .NET Framework. 'Microsoft ASP.NET Core 8.0.30 - Shared Framework' bound to microsoft:.net_framework purely on the shared words, which is a different product line entirely."
+    "microsoft:.net_framework": "ASP.NET Core is not the .NET Framework. 'Microsoft ASP.NET Core 8.0.30 - Shared Framework' bound to microsoft:.net_framework purely on the shared words, which is a different product line entirely.",
+    "versionFromName": "Java 8 only. Java 11 and later report versions like 17.0.19 that already match the index, so they need no rule and fall through unchanged."
   },
   "exclude": [
     "teams meeting add-in",
@@ -64,5 +73,25 @@
     "oracle:java_se": "Same as oracle:jre.",
     "ibm:java": "Same scheme problem as the Oracle Java entries.",
     "microsoft:.net": "The .NET SDK's registry version is its installer version (8.1.3026.37309 for SDK 8.0.130), which shares no scheme with the index's product versions (5.0 to 10)."
+  },
+  "versionFromName": {
+    "oracle:jre": [
+      {
+        "pattern": "Java\\s+8\\s+Update\\s+(\\d+)",
+        "template": "1.8.0_$1"
+      }
+    ],
+    "oracle:jdk": [
+      {
+        "pattern": "Java\\s+8\\s+Update\\s+(\\d+)",
+        "template": "1.8.0_$1"
+      }
+    ],
+    "oracle:java_se": [
+      {
+        "pattern": "Java\\s+8\\s+Update\\s+(\\d+)",
+        "template": "1.8.0_$1"
+      }
+    ]
   }
 }
