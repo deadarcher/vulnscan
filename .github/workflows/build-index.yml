@@ -66,10 +66,17 @@ jobs:
           d = json.load(open("cve-index.json"))
           os_rows = sum(len(v) for v in d.get("os", {}).values())
           app = len(d.get("products", {}))
-          print(f"app products={app}  os builds={len(d.get('os',{}))}  os rows={os_rows}")
+          aliases = len(d.get("aliases", {}))
+          print(f"app products={app}  aliases={aliases}  os builds={len(d.get('os',{}))}  os rows={os_rows}")
           # Refuse to publish a broken index over a working one.
           if app < 10 or os_rows < 1000:
               sys.exit(f"index looks wrong (app={app}, os_rows={os_rows}) - not publishing")
+          # An index with products but no aliases scans CLEAN on every machine, because nothing can
+          # be identified. That shipped undetected from the first commit until 2026-08-31 precisely
+          # because this check only looked at products. Both consumers require the table.
+          if aliases < app:
+              sys.exit(f"alias table is short (aliases={aliases}, products={app}) - not publishing; "
+                       f"an index without aliases reports a false all-clear")
           PY
 
       # One rolling release. "latest" always points at the newest asset, so the redirect target is a

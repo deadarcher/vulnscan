@@ -76,10 +76,18 @@ def main():
             print("\napp index build did not complete cleanly - keeping the previous app section.")
 
     # ── Merge. App products + OS builds/os into the one file the tool downloads.
+    # Aliases are derived HERE, from the products actually being published, not carried over from
+    # the app builder. Both consumers refuse to scan without this table, and deriving it at the point
+    # of write is what stops it drifting from the product list it describes.
+    sys.path.insert(0, HERE)
+    from aliases import needles_for
+    merged_aliases = {k: needles_for(*k.split(":", 1)) for k in app_products}
+
     merged = {
         "v": 1,
         "generated": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "products": app_products,
+        "aliases": merged_aliases,
         "builds": os_index["builds"],
         "os": os_index["os"],
         "osGenerated": os_index["generated"],
@@ -93,6 +101,7 @@ def main():
     os_rows = sum(len(v) for v in merged["os"].values())
     app_rows = sum(len(v) for v in merged["products"].values())
     print(f"\nMERGED -> {OUT}")
+    print(f"  {len(merged['aliases'])} alias entries")
     print(f"  {len(merged['products'])} app products ({app_rows} rows), "
           f"{len(merged['os'])} OS builds ({os_rows} rows)")
     print(f"  raw {len(raw)/1024/1024:.1f} MB, gzipped {os.path.getsize(OUT + '.gz')/1024:.0f} KB")
