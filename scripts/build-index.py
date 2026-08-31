@@ -79,6 +79,28 @@ def main():
     # Aliases are derived HERE, from the products actually being published, not carried over from
     # the app builder. Both consumers refuse to scan without this table, and deriving it at the point
     # of write is what stops it drifting from the product list it describes.
+    # Drop exact duplicate rows. One CVE often names the same version range through several CPE
+    # entries (editions, architectures, update levels) and each produced an identical row; 21 percent
+    # of the index was these, and every one cost the client an iteration and a version comparison for
+    # no extra finding. sun:jdk was 78 percent duplicates.
+    #
+    # This runs HERE, at the point of write, and not in the app builder's fetch loop. That is where
+    # it was first put, and it silently did nothing: the builder skips any product already present
+    # from the seed, so on a seeded run it fetches nothing and the dedupe never executed. Same shape
+    # as the alias table going missing. Anything derived from the final product set belongs next to
+    # the write, not in the path that populates it.
+    before = sum(len(v) for v in app_products.values())
+    for key, rows in app_products.items():
+        seen, keep = set(), []
+        for r in rows:
+            sig = (r[0], r[3], r[4], r[5], r[6])
+            if sig in seen: continue
+            seen.add(sig); keep.append(r)
+        app_products[key] = keep
+    after = sum(len(v) for v in app_products.values())
+    if before:
+        print(f"  deduped {before - after} identical rows ({100 * (before - after) // before}%)")
+
     sys.path.insert(0, HERE)
     from aliases import build_table, exclude_list
     merged_aliases = build_table(app_products)
