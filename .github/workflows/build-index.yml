@@ -1,0 +1,84 @@
+name: Build vulnerability index
+
+# Refreshes the index the tool downloads, and publishes it as a Release asset (not a commit, so the
+# 6 MB file never bloats git history). getrff.com/vulnscan/cve-index.json redirects to the latest
+# asset, so users get fresh data by just re-running the same signed script.
+on:
+  schedule:
+    # 06:15 UTC daily. After Microsoft's Patch Tuesday drop and CISA KEV updates settle.
+    - cron: "15 6 * * *"
+  workflow_dispatch:      # allow a manual run from the Actions tab
+
+concurrency:
+  group: build-index
+  cancel-in-progress: false
+
+permissions:
+  contents: write         # create releases + upload assets
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # MSRC months are immutable once published, so caching them turns the ~80-request first build
+      # into a one-request nightly. The key rolls weekly so the Sunday full rebuild re-fetches
+      # everything (MSRC DOES revise old months) while weekday runs reuse the cache.
+      - name: Restore MSRC month cache
+        uses: actions/cache@v4
+        with:
+          path: .msrc-cache
+          key: msrc-cache-${{ github.run_id }}
+          restore-keys: |
+            msrc-cache-
+
+      # Seed the app section from the CURRENTLY PUBLISHED index so a keyless/throttled NVD run
+      # resumes instead of starting cold, and a bad NVD day keeps the last good app data.
+      - name: Fetch the published index as the app seed
+        run: |
+          curl -sfL https://getrff.com/vulnscan/cve-index.json -o seed-index.json \
+            || echo '{"products":{}}' > seed-index.json
+
+      - name: Build the merged index
+        env:
+          MSRC_CACHE: .msrc-cache
+          APP_SEED: seed-index.json
+          OUT: cve-index.json
+          FLEET_CPES: data/fleet-cpes.json
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}   # optional; unset = keyless pacing, still works
+          # Sunday = full MSRC re-fetch to pick up revisions to old months; other days incremental.
+        run: |
+          if [ "$(date -u +%u)" = "7" ]; then
+            python scripts/build-index.py --full
+          else
+            python scripts/build-index.py
+          fi
+
+      - name: Sanity-check the output before publishing
+        run: |
+          python - <<'PY'
+          import json, sys
+          d = json.load(open("cve-index.json"))
+          os_rows = sum(len(v) for v in d.get("os", {}).values())
+          app = len(d.get("products", {}))
+          print(f"app products={app}  os builds={len(d.get('os',{}))}  os rows={os_rows}")
+          # Refuse to publish a broken index over a working one.
+          if app < 10 or os_rows < 1000:
+              sys.exit(f"index looks wrong (app={app}, os_rows={os_rows}) - not publishing")
+          PY
+
+      # One rolling release. "latest" always points at the newest asset, so the redirect target is a
+      # stable URL: /releases/latest/download/cve-index.json.
+      - name: Publish as the rolling 'index-latest' release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete index-latest --yes --cleanup-tag 2>/dev/null || true
+          gh release create index-latest cve-index.json cve-index.json.gz \
+            --title "Vulnerability index (latest)" \
+            --notes "Auto-built $(date -u +%Y-%m-%dT%H:%MZ). Applications from NVD, Windows OS CVEs from MSRC, KEV flags from CISA. Rebuilt nightly; full MSRC re-fetch on Sundays."
