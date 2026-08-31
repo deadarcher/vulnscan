@@ -1,0 +1,52 @@
+{
+  "_comment": [
+    "Curated corrections to the aliases derived from CPE strings. Derivation gets the common cases",
+    "right and cannot settle ambiguity, so this file is where a human decision is recorded. It is",
+    "data, committed and reviewable, so a wrong call here can be found and fixed by anyone.",
+    "",
+    "add: extra needles for a product. Use when the display name shares no words with the CPE.",
+    "     'Java 8 Update 481' is Oracle's JRE, but the word 'java' appears in no Oracle CPE product",
+    "     name, so without this it binds to ibm:java - a real finding attributed to the wrong vendor.",
+    "",
+    "drop: needles to remove from a product. Use when a derived needle is too broad and steals names",
+    "      that belong to another vendor.",
+    "",
+    "Every entry needs a reason. An unexplained mapping here is indistinguishable from a typo.",
+    "",
+    "exclude: display-name needles that must bind to NOTHING. Some installs are components of a",
+    "         product rather than the product: an add-in or a virtual printer carries its OWN version,",
+    "         so comparing it against the parent product's CVE ranges is meaningless in both",
+    "         directions. This cannot be expressed as an alias, because word-subset matching has no",
+    "         way to say 'not this', so the consumers check it separately."
+  ],
+  "add": {
+    "oracle:jre": [
+      "java update",
+      "java runtime environment"
+    ],
+    "oracle:jdk": [
+      "java development kit"
+    ]
+  },
+  "drop": {
+    "ibm:java": [
+      "java"
+    ],
+    "chaos_tool_suite_project:ctools": [
+      "ctools"
+    ]
+  },
+  "reasons": {
+    "oracle:jre": "Oracle ships as 'Java 8 Update NNN'; no Oracle CPE product contains the word java.",
+    "ibm:java": "The bare needle 'java' captured Oracle's Java on a real machine. IBM's JDK identifies itself as 'IBM SDK' or 'Semeru', so it loses nothing.",
+    "chaos_tool_suite_project:ctools": "A Drupal module. 'CTools' on Windows is something else entirely; the bare needle only ever produces a wrong match.",
+    "exclude": "Components, not products. Their version is the component's, not the parent's, so any comparison against the parent's CVE ranges is meaningless. Measured on a real machine: the Teams Meeting Add-in at 1.26.20101 collected 10 Teams CVEs, and the OneNote virtual printer at 1.0.0.0 collected 6."
+  },
+  "exclude": [
+    "teams meeting add-in",
+    "teams vdi",
+    "onenotevirtualprinter",
+    "python launcher",
+    "mozilla maintenance service"
+  ]
+}

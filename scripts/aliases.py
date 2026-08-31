@@ -6,6 +6,8 @@ generated it, and build-index rebuilt the output dict from an explicit list of k
 include it, so it was computed and then discarded. Deriving it in one place, from the product list
 that is actually being published, means the two can never disagree.
 """
+import json
+import os
 import re
 
 
@@ -83,3 +85,49 @@ def needles_for(vendor, product):
         if not tokenise(n) or n in seen: continue
         seen.add(n); final.append(n)
     return final
+
+
+# ── Curated corrections ───────────────────────────────────────────────────────────────────────────
+# Derivation handles the common shape and cannot settle ambiguity. data/name-overrides.json records
+# the human decisions, with a reason for each, and is applied on top.
+_OVERRIDES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "name-overrides.json")
+
+
+def build_table(product_keys):
+    """The alias table for a set of CPE keys: derived needles, then curated add/drop applied."""
+    table = {k: needles_for(*k.split(":", 1)) for k in product_keys}
+    try:
+        with open(_OVERRIDES, encoding="utf-8") as fh:
+            ov = json.load(fh)
+    except FileNotFoundError:
+        print("  no name-overrides.json - using derived aliases only")
+        return table
+
+    added = dropped = 0
+    for key, extra in ov.get("add", {}).items():
+        if key not in table:
+            # Loud, because a typo here silently does nothing and the wrong binding stays.
+            print(f"  WARNING: override adds needles to '{key}', which is not in the index")
+            continue
+        for n in extra:
+            if n not in table[key]:
+                table[key].append(n); added += 1
+    for key, gone in ov.get("drop", {}).items():
+        if key not in table:
+            print(f"  WARNING: override drops needles from '{key}', which is not in the index")
+            continue
+        before = len(table[key])
+        table[key] = [n for n in table[key] if n not in gone]
+        dropped += before - len(table[key])
+    print(f"  overrides: +{added} needles, -{dropped} needles")
+    return table
+
+
+def exclude_list():
+    """Display-name needles that must bind to nothing. Shipped in the index so both consumers apply
+    the same rule; neither can express it through the alias table."""
+    try:
+        with open(_OVERRIDES, encoding="utf-8") as fh:
+            return json.load(fh).get("exclude", [])
+    except FileNotFoundError:
+        return []

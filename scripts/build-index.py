@@ -80,14 +80,16 @@ def main():
     # the app builder. Both consumers refuse to scan without this table, and deriving it at the point
     # of write is what stops it drifting from the product list it describes.
     sys.path.insert(0, HERE)
-    from aliases import needles_for
-    merged_aliases = {k: needles_for(*k.split(":", 1)) for k in app_products}
+    from aliases import build_table, exclude_list
+    merged_aliases = build_table(app_products)
+    merged_exclude = exclude_list()
 
     merged = {
         "v": 1,
         "generated": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "products": app_products,
         "aliases": merged_aliases,
+        "excludeNames": merged_exclude,
         "builds": os_index["builds"],
         "os": os_index["os"],
         "osGenerated": os_index["generated"],
