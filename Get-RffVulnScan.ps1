@@ -26,7 +26,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string] $IndexUrl = 'https://getrff.com/vulnscan/cve-index.json',
+    [string] $IndexUrl = 'https://getrff.com/vulnscan/cve-index.json.gz',
     # Use an index already on disk instead of fetching one. This is what makes a fully air-gapped
     # run possible: copy the script and the index onto a machine with no internet and still get the
     # complete HTML report, rather than a snapshot you have to carry somewhere else to read.
@@ -260,7 +260,8 @@ if ($IndexFile) {
     try {
         $index = Get-Content -Path $IndexFile -Raw -Encoding UTF8 | ConvertFrom-Json
         $prodCount = 0
-        if ($index -and $index.products) { $prodCount = ($index.products.PSObject.Properties.Name).Count }
+        if ($index -and $index.productsV2) { $prodCount = ($index.productsV2.PSObject.Properties.Name).Count }
+        elseif ($index -and $index.products) { $prodCount = ($index.products.PSObject.Properties.Name).Count }
         # Same rule as the network path: a file that parses but carries no products is not an index
         # and reporting zero findings from it would be a false all-clear.
         if ($prodCount -lt 1) {
@@ -283,8 +284,21 @@ if (-not $index -and -not $Offline) {
         # $resp.Content is a STRING when the server sends a text content-type, but a byte[] when it
         # does not - which is what a GitHub Release asset (the redirect target) returns. Decode the
         # bytes ourselves so the parse never depends on the server guessing right.
-        $body = $resp.Content
-        if ($body -is [byte[]]) { $body = [Text.Encoding]::UTF8.GetString($body) }
+        $raw = $resp.Content
+        if ($raw -isnot [byte[]]) { $raw = [Text.Encoding]::UTF8.GetBytes([string]$raw) }
+        # Detect gzip by MAGIC BYTES rather than by URL, so this works whether the index is served
+        # compressed or plain and needs no change if the hosting moves. The asset host sends no
+        # Content-Encoding even when asked, so the browser cannot inflate it for us and the plain
+        # file is 21 MB against 1.5 MB compressed.
+        if ($raw.Length -gt 2 -and $raw[0] -eq 0x1F -and $raw[1] -eq 0x8B) {
+            $inStream  = New-Object System.IO.MemoryStream(,$raw)
+            $gzip      = New-Object System.IO.Compression.GzipStream($inStream, [System.IO.Compression.CompressionMode]::Decompress)
+            $outStream = New-Object System.IO.MemoryStream
+            $gzip.CopyTo($outStream)
+            $gzip.Dispose(); $inStream.Dispose()
+            $raw = $outStream.ToArray(); $outStream.Dispose()
+        }
+        $body = [Text.Encoding]::UTF8.GetString($raw)
         $index = $body | ConvertFrom-Json
 
         # A PARSE THAT SUCCEEDS IS NOT A VALID INDEX. A proxy, SSL-inspection appliance or captive
@@ -293,7 +307,15 @@ if (-not $index -and -not $Offline) {
         # checked". That is the worst output a vulnerability scanner can produce. Seen on a corporate
         # network 2026-08-31: 'index: 0 products' followed by '0 distinct CVEs'.
         $prodCount = 0
-        if ($index -and $index.products) { $prodCount = ($index.products.PSObject.Properties.Name).Count }
+        if ($index -and $index.productsV2) { $prodCount = ($index.productsV2.PSObject.Properties.Name).Count }
+        elseif ($index -and $index.products) { $prodCount = ($index.products.PSObject.Properties.Name).Count }
+        # Products alone do not make an index usable. Without the alias table nothing can be
+        # IDENTIFIED, so every application resolves to nothing and the run reports a confident zero.
+        # That shipped undetected for the tool's whole life because this check only looked at
+        # products. Treat a missing alias table exactly like an empty index.
+        $aliasCount = 0
+        if ($index -and $index.aliases) { $aliasCount = ($index.aliases.PSObject.Properties.Name).Count }
+        if ($aliasCount -lt 1) { $prodCount = 0 }
         if ($prodCount -lt 1) {
             Write-Host "  the index came back empty or unreadable - NOT a clean result." -ForegroundColor Yellow
             Write-Host "  Something between this machine and the index (a proxy or SSL inspection) likely"
@@ -322,7 +344,7 @@ if (-not $index) {
     Write-Host ""
     Write-Host "This machine could not reach the vulnerability index, so nothing was matched yet."
     Write-Host "Two ways to read it:"
-    Write-Host "  1. Drop the file at $($IndexUrl -replace '/cve-index\.json$','/')"
+    Write-Host "  1. Drop the file at $($IndexUrl -replace '/cve-index\.json(\.gz)?$','/')"
     Write-Host "  2. Run this on a machine WITH internet, or fetch the index once and use:"
     Write-Host "       .\Get-RffVulnScan.ps1 -IndexFile <path-to-cve-index.json>"
     Write-Host "     which does the whole job locally and writes an HTML report - no network needed."
@@ -345,10 +367,31 @@ if (-not $index) {
 # Compare two version strings numerically, segment by segment. Non-numeric segments compare as 0,
 # which is the honest behaviour for things like "8.1-dev": we would rather under-report than invent
 # a match on a version we cannot parse.
+# THE single definition of "is this installed version inside this range". Both the v2 and v1 paths
+# call it, and it mirrors the browser's compareVersions logic exactly. Two copies of this test is how
+# the collector and the page came to disagree by 3x, so there is deliberately only one.
+function Test-VersionInRange([string]$installed, $vs, $si, $ve, $ei) {
+    # No bound at all names the product with no version constraint, which would flag the application
+    # whatever version is installed - a fully patched machine would get the same list as one years
+    # behind. Skipped rather than guessed.
+    if (-not $vs -and -not $ve) { return $false }
+    if ($vs) {
+        $c = Compare-Version $installed $vs
+        if ($c -eq $null) { return $false }
+        if ($si -eq 1) { if ($c -lt 0) { return $false } } else { if ($c -le 0) { return $false } }
+    }
+    if ($ve) {
+        $c = Compare-Version $installed $ve
+        if ($c -eq $null) { return $false }
+        if ($ei -eq 1) { if ($c -gt 0) { return $false } } else { if ($c -ge 0) { return $false } }
+    }
+    return $true
+}
+
 function Compare-Version([string]$a, [string]$b) {
     if ([string]::IsNullOrWhiteSpace($a) -or [string]::IsNullOrWhiteSpace($b)) { return $null }
-    $ax = @(); foreach ($s in ($a -split '[._\-+]')) { $n = 0; [void][int]::TryParse($s, [ref]$n); $ax += $n }
-    $bx = @(); foreach ($s in ($b -split '[._\-+]')) { $n = 0; [void][int]::TryParse($s, [ref]$n); $bx += $n }
+    $ax = @(); foreach ($sg in ($a -split '[._\-+]')) { $n = 0; [void][int]::TryParse($sg, [ref]$n); $ax += $n }
+    $bx = @(); foreach ($sg in ($b -split '[._\-+]')) { $n = 0; [void][int]::TryParse($sg, [ref]$n); $bx += $n }
     $len = [Math]::Max($ax.Count, $bx.Count)
     for ($i = 0; $i -lt $len; $i++) {
         $av = if ($i -lt $ax.Count) { $ax[$i] } else { 0 }
@@ -369,44 +412,131 @@ function Compare-Version([string]$a, [string]$b) {
 function Split-Words([string]$s) {
     return @(($s.ToLowerInvariant() -split '[^a-z0-9+]+') | Where-Object { $_ })
 }
-function Resolve-ProductKey($words, $aliases) {
-    $best = $null; $bestScore = 0
+# Flatten the alias table ONCE into (key, needle-words), sorted longest needle first.
+#
+# The previous version called Split-Words on every needle for every application: 186 apps x 878
+# needles is 163,000 regex splits, each running a Where-Object pipeline, which is one of the slowest
+# things you can do repeatedly in PowerShell 5.1. The needles never change, so this is pure waste.
+#
+# Sorting longest-first also lets the search STOP at its first full match. Matching is most-words-
+# wins, so once the list is descending by word count the first needle that matches is by definition
+# the best one, and everything after it is shorter.
+function Build-AliasTable($aliases) {
+    $table = New-Object System.Collections.ArrayList
+    $ordinal = 0
     foreach ($prop in $aliases.PSObject.Properties) {
         foreach ($needle in $prop.Value) {
             $parts = Split-Words ([string]$needle)
-            if ($parts.Count -le $bestScore) { continue }
-            $all = $true
-            foreach ($p in $parts) { if (-not $words.Contains($p)) { $all = $false; break } }
-            if ($all) { $best = $prop.Name; $bestScore = $parts.Count }
+            if ($parts.Count -gt 0) {
+                [void]$table.Add([pscustomobject]@{
+                    Key = $prop.Name; Parts = $parts; Count = $parts.Count; Ordinal = $ordinal
+                })
+                $ordinal++
+            }
         }
     }
-    return $best
+    # STABLE sort: longest needle first, and original order within equal lengths. Sort-Object is not
+    # stable on its own, and that matters - the original code accepted a needle only when it was
+    # strictly longer than the best so far, so among equally long matches the FIRST one in table
+    # order won. Sorting by count alone reshuffled those ties and changed one binding on a real
+    # machine (484 findings became 483). A speed change that quietly alters results is a bad trade,
+    # so the ordinal pins the tie-break to exactly what it was.
+    return @($table | Sort-Object -Property @{Expression='Count';Descending=$true}, @{Expression='Ordinal';Descending=$false})
+}
+
+function Resolve-ProductKey($words, $aliasTable) {
+    foreach ($entry in $aliasTable) {
+        $all = $true
+        foreach ($p in $entry.Parts) { if (-not $words.Contains($p)) { $all = $false; break } }
+        # First match wins: the table is sorted longest-needle-first, so nothing later can beat it.
+        if ($all) { return $entry.Key }
+    }
+    return $null
 }
 
 Write-Step 'Matching...'
 $mwatch = [Diagnostics.Stopwatch]::StartNew()
 $findings = New-Object Collections.ArrayList
 $aliases = $index.aliases
+$aliasTable = Build-AliasTable $aliases
+$excludeNames = @()
+if ($index.excludeNames) { $excludeNames = @($index.excludeNames) }
+$incomparable = $null
+if ($index.incomparable) { $incomparable = $index.incomparable }
+$versionFromName = $null
+if ($index.versionFromName) { $versionFromName = $index.versionFromName }
+$notCompared = New-Object System.Collections.ArrayList
 foreach ($app in $apps) {
     $appWords = New-Object 'System.Collections.Generic.HashSet[string]'
     foreach ($w in (Split-Words $app.name)) { [void]$appWords.Add($w) }
-    $key = Resolve-ProductKey $appWords $aliases
+    # Components of a product are not the product. An add-in, a virtual printer or a launcher
+    # carries its OWN version, so comparing it against the parent product's CVE ranges is
+    # meaningless in both directions - it invents findings on a patched machine and hides them on an
+    # unpatched one. The index ships the list because word-subset matching cannot express "not
+    # this". Measured: the Teams Meeting Add-in collected 10 Teams CVEs off its own version number.
+    $skip = $false
+    foreach ($ex in $excludeNames) {
+        $all = $true
+        foreach ($p in (Split-Words $ex)) { if (-not $appWords.Contains($p)) { $all = $false; break } }
+        if ($all) { $skip = $true; break }
+    }
+    if ($skip) { continue }
+    $key = Resolve-ProductKey $appWords $aliasTable
     if (-not $key) { continue }
-    $rows = $index.products.$key
-    if (-not $rows) { continue }
-    foreach ($r in $rows) {
-        # row = [cve, sev, kev, vStart, startIncl, vEnd, endIncl]
-        $vs = $r[3]; $si = $r[4]; $ve = $r[5]; $ei = $r[6]
-        $ok = $true
-        if ($vs) { $c = Compare-Version $app.version $vs
-                   if ($c -eq $null) { $ok = $false } elseif ($si -eq 1) { if ($c -lt 0) { $ok = $false } } else { if ($c -le 0) { $ok = $false } } }
-        if ($ok -and $ve) { $c = Compare-Version $app.version $ve
-                   if ($c -eq $null) { $ok = $false } elseif ($ei -eq 1) { if ($c -gt 0) { $ok = $false } } else { if ($c -ge 0) { $ok = $false } } }
-        if (-not $ok) { continue }
-        [void]$findings.Add([pscustomobject]@{
-            cve = $r[0]; severity = $r[1]; kev = $r[2]
+    # Where the registry version is in a different scheme from the index, derive a comparable one
+    # from the DISPLAY NAME. Oracle ships Java 8 as "Java 8 Update 481" with registry version
+    # 8.0.4810.10, while NVD states it as 1.8.0 + update481. The name carries the update number
+    # plainly, so it is read from there instead of decoding 4810, which would be guesswork.
+    $version = $app.version
+    if ($versionFromName -and $versionFromName.PSObject.Properties.Name -contains $key) {
+        foreach ($rule in @($versionFromName.$key)) {
+            $rm = [regex]::Match($app.name, $rule.pattern, [Text.RegularExpressions.RegexOptions]::IgnoreCase)
+            if ($rm.Success) {
+                $rv = $rule.template
+                for ($gi = 1; $gi -lt $rm.Groups.Count; $gi++) {
+                    $rv = $rv.Replace(('$' + $gi), $rm.Groups[$gi].Value)
+                }
+                $version = $rv
+                break
+            }
+        }
+    }
+
+    # Known scheme mismatch and no rule fired: the comparison would SUCCEED and return the wrong
+    # answer, so refuse and say so. Java 8u481 used to report CLEAN this way.
+    if ($incomparable -and $incomparable.PSObject.Properties.Name -contains $key -and $version -eq $app.version) {
+        [void]$notCompared.Add([pscustomobject]@{
             software = $app.name; version = $app.version; product = $key
+            reason = $incomparable.$key
         })
+        continue
+    }
+    $groups = $null
+    if ($index.productsV2) { $groups = $index.productsV2.$key }
+    if ($groups) {
+        # v2: CVEs are grouped by version bound, so each DISTINCT bound is compared ONCE and the
+        # whole CVE list is attributed to it. The bounds repeat enormously - 249 Firefox CVEs all
+        # share "< 152.0.0" - so comparing per CVE repeated the same arithmetic thousands of times.
+        foreach ($g in $groups) {
+            if (-not (Test-VersionInRange $version $g[0] $g[1] $g[2] $g[3])) { continue }
+            foreach ($c in $g[4]) {
+                [void]$findings.Add([pscustomobject]@{
+                    cve = $c[0]; severity = $c[1]; kev = $c[2]
+                    software = $app.name; version = $app.version; product = $key
+                })
+            }
+        }
+    } else {
+        # v1: one row per CVE. Kept so a saved -IndexFile from before the format change still works.
+        $rows = $index.products.$key
+        if (-not $rows) { continue }
+        foreach ($r in $rows) {
+            if (-not (Test-VersionInRange $version $r[3] $r[4] $r[5] $r[6])) { continue }
+            [void]$findings.Add([pscustomobject]@{
+                cve = $r[0]; severity = $r[1]; kev = $r[2]
+                software = $app.name; version = $app.version; product = $key
+            })
+        }
     }
 }
 $matchMs = $mwatch.ElapsedMilliseconds
@@ -420,6 +550,13 @@ $kev  = @($unique | Where-Object { $_.kev -eq 1 }).Count
 Write-Host ""
 $appCount = @($findings | Group-Object software).Count
 Write-Host ("{0} distinct CVEs across {1} applications  ({2} ms to match)" -f @($unique).Count, $appCount, $matchMs) -ForegroundColor Yellow
+if ($notCompared.Count -gt 0) {
+    # Printed with the headline, not buried below it: these applications were RECOGNISED, so without
+    # this line they would sit silently inside the "checked" count with nothing actually compared.
+    Write-Host ("  {0} application(s) could NOT be checked - the installed version and the published" -f $notCompared.Count) -ForegroundColor Yellow
+    Write-Host "  CVE versions use different numbering schemes. This is NOT a clean result for them:" -ForegroundColor Yellow
+    foreach ($nc in $notCompared) { Write-Host ("    {0} ({1})" -f $nc.software, $nc.version) -ForegroundColor Yellow }
+}
 Write-Host ("  {0} critical, {1} high, {2} on CISA KEV" -f $crit, $high, $kev)
 Write-Host ("  OS {0} - patch level checked separately, see the report" -f $os.fullBuild)
 
@@ -467,8 +604,8 @@ if (-not $NoReport -and $env:RFF_NO_OPEN -ne '1') { Start-Process $OutFile }
 # SIG # Begin signature block
 # MIIs4AYJKoZIhvcNAQcCoIIs0TCCLM0CAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAQowJow9V3v9oS
-# MSuOTwAjXYoyOTgZpGwFpKbj8lh7QKCCJfQwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD0BMzyk8sVvTfg
+# OiqaHex+uKyH3nx9widpwAvWgOd616CCJfQwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -675,34 +812,34 @@ if (-not $NoReport -and $env:RFF_NO_OPEN -ne '1') { Start-Process $OutFile }
 # aXRlZDErMCkGA1UEAxMiU2VjdGlnbyBQdWJsaWMgQ29kZSBTaWduaW5nIENBIFIz
 # NgIRAOUh6XwCWyBKxteUB+wQfigwDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGC
 # NwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgor
-# BgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgG1PKRpwS
-# 9vpWXMe7FBbEaL/rtuz3dZP5MbzW4fW/f4owDQYJKoZIhvcNAQEBBQAEggIALsUz
-# AOEzJesLmGpo/oKrYXmxtaeJfJIobhmenoNcDlfNIxnxkSj47c3sdhNLzSfGZChc
-# 1jfyXeOjSlDFsrmLq6Duh2bAsD34MVSeDua7IDya1tGigWeYghY8SuWe7Gx5XQA4
-# 1Xxi4K/Gi3DFoq1fyEHOaeDHgxnIGAoVr99B/TdG5Hc1TtWUH4X3nSghitPq9ZeX
-# v90VYSGboOFi3ripJ2csTqVNa6bFXAXz1+ExJCcMubvKAcQ+xeOdSfiy5jHPxXFt
-# LwXe2h1r8SqyiGU7eWkKenRXoJLwpmWD9ERUD5hal/MuwE+nqg9xhlNBH3KmTnnV
-# KLi24NBUBdMrqMYRZQWnuwRbaNKb9VSEYM8SSEvG1gLJ5SGQL1GDlZcaGXtebRf9
-# hEyjnjyrrTW9RvTHdT4PVXIWKpOpCyV3twEUU+91nffqPMmAqB9C2U74JCAzYqyR
-# ov4q7bQKGjiO792GtnmCmymxVAxeEuatrO6KuU7CjTFC+tTWVbOC8m9NmfrGiSx9
-# 0P5thK2dB1JqMF6SVg9P3hCT8yHQsTT80Dj3rcTkjrVnGa2Cju8H1mzNfg3hTsfF
-# 0EmpuObU/HSXnQ2H5xRKvafkL393j/vaSHlqYGIQ91mFZ4hN1AfxjbEpFX53ICGn
-# +Q0Kq0NRpuZiJiNAluMYVCzXu6++1iLsb/cFV2ChggMjMIIDHwYJKoZIhvcNAQkG
+# BgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgyg3odBpj
+# N7uJxLHdfg++VdG7F0unY6AiuO/A3g8E77AwDQYJKoZIhvcNAQEBBQAEggIAU/pG
+# zcEFAAlQ8cEhpsntfJ0iM34UIfdi+ymKYV1CtjDnD+79VOeYbXUP/+266Y+LSOqF
+# LdUu/sAIp5hSFqhnn2nhIDbE0RKWWjv4jBovp8GEJX0h2WaclkUjb4Kpj4dddNqa
+# Zau8TC2mks1+K0U3kWhVgLUGgfbFfCKca/LnuesrHocX4l3cOW/7kMttYG8VxMIv
+# moJSp0ydBJ/3ExxprkozW31e4rdDT/SCAJ92ESnLyzPCgktIa1K1d7u/lf7McucS
+# Gr1smvnoIesbaHJPMVT0JwNrqaoewVSfWl8L6VCOC5+6u/ndIgS9DwFxZRLegNZP
+# 9in1l+k4LOHTaEBOWYjcEdwOWe4OlA39zrBspsipajQbx+zsk6s4OVMcv/0RypPW
+# mApq4jGrU6J6Kh6Rb8M4iNvifyU/41Pf8D6uWbNAykDLQoTNwVsmS9j4bgizRaXw
+# cWY53nQn7V+FTlXQMU2xLujrJoIoTyegdZhNjDrUNiiMSWM3O4Gqy7ZTpKM8iO0n
+# H9nTOCJm7w2L4DT3kq+ZOvzhLPkaaw2JoloOq0S4CbkaSTeFSXRknp8G21WwdXaS
+# Rg0/5/q6KVU8ZPQsyWQfNVYJIr3iL/3HDkFAFkZ3d4zo1d2dFZ0bGlHi078yQ/TB
+# T645g2iKNYF+TeBETqryK5oo8rMQZ30N2JtC396hggMjMIIDHwYJKoZIhvcNAQkG
 # MYIDEDCCAwwCAQEwajBVMQswCQYDVQQGEwJHQjEYMBYGA1UEChMPU2VjdGlnbyBM
 # aW1pdGVkMSwwKgYDVQQDEyNTZWN0aWdvIFB1YmxpYyBUaW1lIFN0YW1waW5nIENB
 # IFI0MQIRAOdO8lWwUE/626bf9/yLoxUwDQYJYIZIAWUDBAICBQCgeTAYBgkqhkiG
-# 9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA4MzExNjQzNTha
-# MD8GCSqGSIb3DQEJBDEyBDCpljGOAYqgXxTNtzBlNfTjMU/wBZGuYKpvmXaaP4gf
-# KL7uXatnVJ+dxwUsHVoOwkgwDQYJKoZIhvcNAQEBBQAEggIALRAEqM76sjWVlNGM
-# Wt7wxDoMm9Vcr1if0MI3D6H+LAHBRp8aumQQKvXOb1FY+nbiPnT4kDX1Z0cQ3rd7
-# VjyXbkqMTVF/il3Jx2fUF0kT4MgxIUdN/MdrYznUjxouEuYnILpp4r4yQ98GNXV6
-# 1yQS/AgvNHMB4ryu4n5ik1SFE0N2A5eH+dl89Db3xR9FguFxvcWbCavULRwa9yMc
-# LbCckYDtJtiRbNnkFF0TFWuL+2hl9L9NyIpOsmpO46NZl9AAmuzmFb88loF8eiDY
-# OHo3iZr8SiF4kv3J/sLbx8jo0aZ/St+ehecvNdNpo1psHv/q06f4DOzJRmHEdigc
-# Gl2XAMFQ0dbG0+JLZB/Mc9ZBGypb9t5wJ3i0SzBQ9sv+HyRdrr+Wv7ZaY4R+TViG
-# ngQJtKl9GJk2oEofpiKuz1mWBDw1tMfGmnCKqYmlWRgjvQThs76vW1wIOG6uioy4
-# DNOl2dMx6Rko/BXnOxQX+Kx20xsWB/cDm1zEguNc4QtcMxX/qja464oXU3XuNR5b
-# xnC/3GpupWfYoFOj7Ws7dlbqQ/l/Vmtkwv4dcbf2hcVh+9A/oEVEa4xJLpQx6Z/m
-# zLQyBnAgbhghCbsO0ndmvNe8A6yKgq15wm7Nk9iMK8l6WrJBUYJ2lz2nLJYbKYK5
-# f3shVnJdvh+sj+jTHNEHwtam54Q=
+# 9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA5MDEwMDA5MzRa
+# MD8GCSqGSIb3DQEJBDEyBDD1AcMrfh4KXQdfA2LdRa2NzGBcRwmlOZRFpjOxliD9
+# 7otu8qa66KZncQmUukopBswwDQYJKoZIhvcNAQEBBQAEggIAhDplPXy+jAjWCZ/G
+# EHk/4EBRlRuTl35OIt/WNuvywljdU8g4SMlxhchS+LjjSb3OYuSrFcT+xqyv4R8l
+# idMHy08mJS56oYwyzTe1h4gosgzdZ2+1ZipM0WkE8qytaP/emHZ44i9ZZBoE2yc3
+# Ow6lGPTqdJ/LjZ207RBWNHrEfIbeZZcKCBNsVCiPVjjm2O/qxohFJAX3v+ommnIO
+# G68ChS9yDAmNWpwcbSyV8Clmdi1eyXLCfUbt3UyZKXDfXNmTT0nW8dpvhTwEjxbW
+# RunjepUZTHs6YU3ksuNMKX+hCgD3yq/9eWzpWXhg4V9xpUbRMJBubr5hRu0tklH+
+# LWZduV7l24iwn5h5LmDZR3vg4WqiB+71WIrOA82//FfQr1JzzqXfUbDr13BGsy8G
+# 8XTceD7firSDSiLy0TCUei9WlOzzMIBdlFzYAkaKch1wRJosmK8+6OTcO82oeF8E
+# kHrrPLWVdLZNhi0YmG2oU8cfe7CIw5iHJR/tL0BjHDUgzmEHIc9GMWpbnMpW2upl
+# YwLPTKmTgBH6Rj4rxLfvggQ6c5l7o8WP0+qClRqcqZJyJA2skKL2ul/KRbcmKL5+
+# UOLmnNzMHl8x70seIOHVtnpkeCTKvXlxm45O4aRGnzPv9sNrMKIwwkVmjXxSDzpY
+# 9byD4HfOL30jIqwkX1uZrlchJW0=
 # SIG # End signature block
