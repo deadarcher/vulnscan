@@ -1,4 +1,4 @@
-# The collector is Authenticode-signed. Its signature is over the exact bytes, so git must never
-# normalize its line endings - -text disables all EOL conversion for it.
-Get-RffVulnScan.ps1 -text
+# EVERY .ps1 verbatim. Authenticode is a trailer over exact bytes, and git's autocrlf rewrites the
+# stored blob, so the working copy reads Valid while the committed and served copy reads NotSigned.
+# A named path gets forgotten the moment a second signed script appears; a pattern does not.
 *.ps1 -text
