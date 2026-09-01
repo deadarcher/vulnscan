@@ -100,6 +100,42 @@ CVE count. An application that is not in it is reported as collected-but-uncheck
 If a product you care about is missing, or a match looks wrong,
 [open an issue](https://github.com/deadarcher/vulnscan/issues) or add it to `data/fleet-cpes.json`.
 
+## Build the index yourself
+
+Nothing here has to be taken on trust. The builders pull from the original sources, so you can
+produce your own index and diff it against the published one.
+
+```
+git clone https://github.com/deadarcher/vulnscan
+cd vulnscan
+docker build -t vulnscan-index .
+docker run --rm -e NVD_API_KEY=your-key -v "${PWD}/out:/out" vulnscan-index
+```
+
+That writes `out/cve-index.json`. Point the collector at it and no network call touches getrff.com
+at any stage:
+
+```
+.\Get-RffVulnScan.ps1 -IndexFile .\out\cve-index.json
+```
+
+An NVD API key is free from
+[nvd.nist.gov](https://nvd.nist.gov/developers/request-an-api-key). Without one it still works, at
+NVD's keyless rate limit: roughly 70 minutes for a full build instead of about 12. The run tells you
+which mode it is in.
+
+Where the data comes from, in case you would rather read it than believe it: applications from NVD's
+CVE API, Windows OS CVEs from Microsoft's MSRC CVRF feed, exploited-in-the-wild flags from CISA's
+KEV catalog. All three are public and none of them are us. The builders are standard-library Python
+with no pip install, so there is no third-party dependency to audit either.
+
+**Covering software we do not.** The product list is `data/fleet-cpes.json`, a plain array of CPE
+strings. Add the ones you care about, rebuild, and your index covers them. If a product is missing
+that others would want too, a pull request is welcome.
+
+**Useful knobs:** `SKIP_APP=1` rebuilds only the Windows OS half, which needs no API key and takes
+about a minute. `MSRC_CACHE` persists in `out/.msrc-cache`, so later runs re-fetch only what changed.
+
 ## Why it exists
 
 It is the vulnerability report from [RFF](https://getrff.com), run once on one machine instead of
