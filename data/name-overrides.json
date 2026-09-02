@@ -41,6 +41,10 @@
     ],
     "oracle:jdk": [
       "java development kit"
+    ],
+    "adobe:acrobat_reader_dc": [
+      "adobe acrobat reader",
+      "acrobat reader"
     ]
   },
   "drop": {
@@ -55,9 +59,11 @@
     "oracle:jre": "Oracle ships as 'Java 8 Update NNN'; no Oracle CPE product contains the word java.",
     "ibm:java": "The bare needle 'java' captured Oracle's Java on a real machine. IBM's JDK identifies itself as 'IBM SDK' or 'Semeru', so it loses nothing.",
     "chaos_tool_suite_project:ctools": "A Drupal module. 'CTools' on Windows is something else entirely; the bare needle only ever produces a wrong match.",
-    "exclude": "Components, not products. Their version is the component's, not the parent's, so any comparison against the parent's CVE ranges is meaningless. Measured on a real machine: the Teams Meeting Add-in at 1.26.20101 collected 10 Teams CVEs, and the OneNote virtual printer at 1.0.0.0 collected 6.",
+    "exclude": "Components, not products. Their version is the component's, not the parent's, so any comparison against the parent's CVE ranges is meaningless. Measured on a real machine: the Teams Meeting Add-in at 1.26.20101 collected 10 Teams CVEs, and the OneNote virtual printer at 1.0.0.0 collected 6. Extended 2026-09-02 from the RFF fleet, where the same class was 70% of every active finding and 24 of 26 KEV rows: Microsoft.Edge.GameAssist (1.0.4019.0) and Microsoft Edge Update (1.3.195.61) both inherited Edge's CVEs whose fixes are 86-100.x, WebView2 Runtime is a separate product Edge does not patch, and WinRAR.ShellExtension (1.0.0.2) inherited WinRAR's 6.23-7.13. None can ever satisfy a fix, so none can ever clear.",
     "microsoft:.net_framework": "ASP.NET Core is not the .NET Framework. 'Microsoft ASP.NET Core 8.0.30 - Shared Framework' bound to microsoft:.net_framework purely on the shared words, which is a different product line entirely.",
-    "versionFromName": "Java 8 only. Java 11 and later report versions like 17.0.19 that already match the index, so they need no rule and fall through unchanged."
+    "versionFromName": "Java 8 only. Java 11 and later report versions like 17.0.19 that already match the index, so they need no rule and fall through unchanged.",
+    "python:python": "CPython registers major.minor.(patch*1000+150).0, so 3.12.10 reads as 3.12.10150.0 and 3.10.6 as 3.10.6150.0. That third segment sorts ABOVE the fix in its own release line, so a CVE published as 'affects 3.12.0 to 3.12.13' never matched - a silent false negative. Verified on the RFF fleet 2026-09-02: reading the version from the name surfaced 8 same-line CVEs that had been invisible. Read from the name rather than decoding 10150, which would be arithmetic inferred from a handful of samples.",
+    "adobe:acrobat_reader_dc": "The derived needle 'acrobat reader dc' requires the word 'dc', which the display name 'Adobe Acrobat Reader (64-bit)' does not contain, so real Acrobat Reader bound to nothing and reported no CVEs at all. Found 2026-09-02 while checking whether the tool shared the product's component false-match bug; it did not, but it had this instead."
   },
   "exclude": [
     "teams meeting add-in",
@@ -65,7 +71,12 @@
     "onenotevirtualprinter",
     "python launcher",
     "mozilla maintenance service",
-    "asp.net core"
+    "asp.net core",
+    "gameassist",
+    "edge update",
+    "webview2 runtime",
+    "shellextension",
+    "slimcorevdi"
   ],
   "incomparable": {
     "oracle:jre": "NVD carries Java's update level in the CPE update field, not the version, so the index holds only 1.8, 1.8.0 and 8.0 for all of Java 8. It cannot tell 8u481 from 8u451. The installed registry version (8.0.4810.10) is Oracle's installer version and compares above every bound, so the app silently reported clean.",
@@ -91,6 +102,12 @@
       {
         "pattern": "Java\\s+8\\s+Update\\s+(\\d+)",
         "template": "1.8.0_$1"
+      }
+    ],
+    "python:python": [
+      {
+        "pattern": "Python\\s+(\\d+\\.\\d+(?:\\.\\d+)?)\\b",
+        "template": "$1"
       }
     ]
   }
